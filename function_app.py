@@ -45,4 +45,4 @@ def get_chat_completion(message_text):
         stop=None
     )
 
-    return completion
+    return completion['choices'][0]['message']['content']
