@@ -9,17 +9,17 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 def voicelens(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
 
-    messange = req.params.get('messange')
-    if not messange:
+    message = req.params.get('message')
+    if not message:
         try:
             req_body = req.get_json()
         except ValueError:
             pass
         else:
-            messange = req_body.get('messange')
+            message = req_body.get('message')
 
-    if messange:
-        return func.HttpResponse(get_chat_completion(messange))
+    if message:
+        return func.HttpResponse(get_chat_completion(message))
     else:
         return func.HttpResponse(
              "This HTTP triggered function executed successfully. Pass a name in the query string or in the request body for a personalized response.",
