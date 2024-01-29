@@ -1,7 +1,11 @@
 import azure.functions as func
 import azure.cognitiveservices.speech as speechsdk
+from azure.cognitiveservices.vision.computervision import ComputerVisionClient
+from azure.cognitiveservices.vision.computervision.models import OperationStatusCodes
+from msrest.authentication import CognitiveServicesCredentials
 import os
 import openai
+import time
 import logging
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
@@ -17,6 +21,8 @@ def voicelens(req: func.HttpRequest) -> func.HttpResponse:
         except ValueError:
             pass
         else:
+            image = req_body.get('image_url')
+            # image_text = extract_text_from_image(image)
             message = req_body.get('message')
             audio_data = synthesize_speech_to_audio_data(message)
 
@@ -27,6 +33,52 @@ def voicelens(req: func.HttpRequest) -> func.HttpResponse:
              "This HTTP triggered function executed successfully. Pass a name in the query string or in the request body for a personalized response.",
              status_code=200
         )
+
+def extract_text_from_image(image_url):
+    """
+    Extracts text from the given image URL using the Azure Computer Vision API.
+
+    Args:
+    image_url (str): The URL of the image from which to extract the text.
+
+    Returns:
+    str: Extracted text from the image or None if the extraction fails.
+    """
+    # Authenticate
+    subscription_key = os.environ["MULTI_SERVICE_KEY"]
+    endpoint = os.environ["MULTI_SERVICE_ENDPOINT"]
+
+    computervision_client = ComputerVisionClient(endpoint, CognitiveServicesCredentials(subscription_key))
+
+    '''
+    OCR: Read File using the Read API, extract text - remote
+    This example will extract text in an image, then print results, line by line.
+    This API call can also extract handwriting style text (not shown).
+    '''
+
+    # Call API with URL and raw response (allows you to get the operation location)
+    read_response = computervision_client.read(image_url,  raw=True)
+
+    # Get the operation location (URL with an ID at the end) from the response
+    read_operation_location = read_response.headers["Operation-Location"]
+    # Grab the ID from the URL
+    operation_id = read_operation_location.split("/")[-1]
+
+    # Call the "GET" API and wait for it to retrieve the results 
+    while True:
+        read_result = computervision_client.get_read_result(operation_id)
+        if read_result.status not in ['notStarted', 'running']:
+            break
+        time.sleep(1)
+
+    # Print the detected text, line by line
+    if read_result.status == OperationStatusCodes.succeeded:
+        # Output the result
+        extracted_text = "".join(
+            line.text for text_result in read_result.analyze_result.read_results
+            for line in text_result.lines
+        )
+    return extracted_text
 
 def get_chat_completion(message_text):
     # Configure the OpenAI API settings
