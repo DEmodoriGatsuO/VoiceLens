@@ -1,3 +1,10 @@
+# Author: De'modori Gatsuo
+# Date: 2024-01-30
+# Description: This script uses the Azure AI Service to read the text in front of you using OCR, OpenAI proofreading, and Text to Speech
+# Updates:
+#   2024-01-30: launch
+
+
 import azure.functions as func
 import azure.cognitiveservices.speech as speechsdk
 from azure.cognitiveservices.vision.computervision import ComputerVisionClient
@@ -6,7 +13,9 @@ from msrest.authentication import CognitiveServicesCredentials
 import os
 import openai
 import time
+import base64
 import logging
+from io import BytesIO
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
@@ -14,71 +23,73 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 def voicelens(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
 
-    message = req.params.get('message')
-    if not message:
+    # message = req.params.get('message')
+    encoded_image_data = req.params.get('image')
+    if not encoded_image_data:
         try:
             req_body = req.get_json()
         except ValueError:
             pass
         else:
-            image = req_body.get('image_url')
-            # image_text = extract_text_from_image(image)
-            message = req_body.get('message')
+            encoded_image_data = req_body.get('image')
+            # 1. Read API - OCR
+            image_text = extract_text_from_image(encoded_image_data)
+            # 2. OpenAI
+            message = get_chat_completion(image_text)
+            # 3. Text to Speech
             audio_data = synthesize_speech_to_audio_data(message)
 
-    if message:
+    if image_text:
         return func.HttpResponse(audio_data)
     else:
         return func.HttpResponse(
-             "This HTTP triggered function executed successfully. Pass a name in the query string or in the request body for a personalized response.",
+             "This HTTP triggered function executed successfully.",
              status_code=200
         )
 
-def extract_text_from_image(image_url):
+def extract_text_from_image(encoded_image_data):
     """
-    Extracts text from the given image URL using the Azure Computer Vision API.
+    Extracts text from the given base64-encoded image data using the Azure Computer Vision API.
 
     Args:
-    image_url (str): The URL of the image from which to extract the text.
+    encoded_image_data (str): The base64-encoded data of the image from which to extract the text.
 
     Returns:
     str: Extracted text from the image or None if the extraction fails.
     """
+    # Decode the base64-encoded data
+    image_data = base64.b64decode(encoded_image_data)    
     # Authenticate
     subscription_key = os.environ["MULTI_SERVICE_KEY"]
     endpoint = os.environ["MULTI_SERVICE_ENDPOINT"]
 
     computervision_client = ComputerVisionClient(endpoint, CognitiveServicesCredentials(subscription_key))
 
-    '''
-    OCR: Read File using the Read API, extract text - remote
-    This example will extract text in an image, then print results, line by line.
-    This API call can also extract handwriting style text (not shown).
-    '''
+    # Call API with image data
+    try:
+        image_stream = BytesIO(image_data)
+        read_response = computervision_client.read_in_stream(image_stream,  raw=True)
 
-    # Call API with URL and raw response (allows you to get the operation location)
-    read_response = computervision_client.read(image_url,  raw=True)
+        # Get the operation location (URL with an ID at the end) from the response
+        read_operation_location = read_response.headers["Operation-Location"]
+        operation_id = read_operation_location.split("/")[-1]
 
-    # Get the operation location (URL with an ID at the end) from the response
-    read_operation_location = read_response.headers["Operation-Location"]
-    # Grab the ID from the URL
-    operation_id = read_operation_location.split("/")[-1]
+        # Call the "GET" API and wait for it to retrieve the results 
+        while True:
+            read_result = computervision_client.get_read_result(operation_id)
+            if read_result.status not in ['notStarted', 'running']:
+                break
+            time.sleep(1)
 
-    # Call the "GET" API and wait for it to retrieve the results 
-    while True:
-        read_result = computervision_client.get_read_result(operation_id)
-        if read_result.status not in ['notStarted', 'running']:
-            break
-        time.sleep(1)
-
-    # Print the detected text, line by line
-    if read_result.status == OperationStatusCodes.succeeded:
-        # Output the result
-        extracted_text = "".join(
-            line.text for text_result in read_result.analyze_result.read_results
-            for line in text_result.lines
-        )
-    return extracted_text
+        # Extract and return text if operation succeeded
+        if read_result.status == OperationStatusCodes.succeeded:
+            return "".join(
+                line.text for text_result in read_result.analyze_result.read_results
+                for line in text_result.lines
+            )
+    except Exception as e:
+        logging.info(f"An error occurred: {e}")
+        return None
 
 def get_chat_completion(message_text):
     # Configure the OpenAI API settings
@@ -116,13 +127,13 @@ def get_chat_completion(message_text):
 
 def synthesize_speech_to_audio_data(text):
     """
-    Converts the given text to speech and returns the audio data.
+    Converts the given text to speech and returns the base64 encoded audio data.
 
     Args:
     text (str): Text to be converted to speech.
 
     Returns:
-    bytes: The audio data in binary format.
+    str: The base64 encoded audio data as a string.
     """
 
     # Configure Azure Speech Service
@@ -140,9 +151,10 @@ def synthesize_speech_to_audio_data(text):
     # Convert text to speech
     speech_synthesis_result = speech_synthesizer.speak_text_async(text).get()
 
-    # If synthesis is successful, return the audio data
+    # If synthesis is successful, encode and return the audio data
     if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-        return speech_synthesis_result.audio_data
+        audio_data = speech_synthesis_result.audio_data
+        return base64.b64encode(audio_data).decode('utf-8')
 
     # If synthesis fails, raise an exception
     elif speech_synthesis_result.reason == speechsdk.ResultReason.Canceled:
