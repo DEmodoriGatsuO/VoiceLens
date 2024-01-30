@@ -32,7 +32,8 @@ Use with Power Platform👍
 ```
 
 ## License
- - please wait
+
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Contact
 For any queries, please contact De'modori Gatsuo!
