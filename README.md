@@ -1,7 +1,7 @@
 # VoiceLens
 
 ## Description
-[Project description here - what it does, its purpose, and any unique features.]
+This script uses the Azure AI Service to read the text in front of you using OCR, OpenAI proofreading, and Text to Speech.
 
 ## Installation
 
